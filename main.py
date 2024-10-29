@@ -1,61 +1,172 @@
-from hotel import Hotel
-from room import RoomType
-from datetime import date
-import threading
-
-class HotelManagementDemo:
-
-    @staticmethod
-    def reserve_room_concurrently(hotel, room_no, amount_paid, checkin_date, checkout_date):
-        """
-        This method will attempt to reserve a room in the hotel concurrently in multiple threads.
-        """
-        try:
-            reservation = hotel.create_reservation(room_no, amount_paid, checkin_date, checkout_date)
-            print(f"Reservation successful for room {room_no}: Total Amount: {reservation.total_amount}, Paid: {reservation.amount_paid}")
-        except Exception as e:
-            print(f"Failed to reserve room {room_no}: {str(e)}")
+import time
+from collections import defaultdict, deque
 
 
 
-    @staticmethod
-    def run():
+class TokenBucketRateLimiter:
+
+    def __init__(self, rate, capacity):
+        self.rate = rate
+        self.capacity = capacity
+        self.tokens = defaultdict(lambda:capacity)
+        self.last_refill = defaultdict(lambda: time.time())
 
 
-        hotel1 = Hotel("le mor", "1") 
-        hotel1.create_room_inventory(RoomType.SINGLE, 5, 800)
-        hotel1.create_room_inventory(RoomType.DOUBLE, 3, 1000)
+    def allow_request(self, userId):
+        now = time.time()
+        time_passed = now - self.last_refill[userId]
+        self.tokens[userId] = min(self.capacity, self.tokens[userId]+(time_passed*self.rate))
+        self.last_refill[userId] = now
 
-        hotel1.view_rooms()
-
-        checkin_date = date(24, 5, 1)
-        checkout_date = date(24, 5, 3)
-
-        checkin_date2 = date(24, 5, 2)
-
-         # Creating two threads that will try to reserve the same room at the same time
-        thread1 = threading.Thread(target=HotelManagementDemo.reserve_room_concurrently, args=(hotel1, "1_0", 0, checkin_date, checkout_date))
-        thread2 = threading.Thread(target=HotelManagementDemo.reserve_room_concurrently, args=(hotel1, "1_0", 0, checkin_date2, checkout_date))
+        if self.tokens[userId] >= 1:
+            self.tokens[userId] -= 1
+            return True
+        return False
 
 
-        # Creating another thread to reserve a different room at the same time
-        thread3 = threading.Thread(target=HotelManagementDemo.reserve_room_concurrently, args=(hotel1, "1_1", 0, checkin_date, checkout_date))
 
-        # Start all threads
-        thread1.start()
-        thread2.start()
-        thread3.start()
+class FixedWindowRateLimiter:
 
-        # Wait for all threads to finish
-        thread1.join()
-        thread2.join()
-        thread3.join()
+    def __init__(self, window_size, capacity):
+        self.window_size = window_size
+        self.requests = defaultdict(int)
+        self.capacity = capacity
+        self.start_time = time.time()
 
-       
-     
+    
+    def allow_request(self, userId):
+        now = time.time()
+        if now - self.start_time > self.window_size:
+            self.requests.clear()
+            self.window_start = now
+        
+        if self.requests[userId] < self.capacity:
+            self.requests[userId] += 1
+            return True
+        
+        return False
+
+
+class SlidingWindowLogRateLimiter:
+
+    def __init__(self, window_size, max_request):
+        self.window_size = window_size
+        self.max_request = max_request
+        self.requests = defaultdict(deque)
+
+    
+    def allow_request(self, userId):
+        now = time.time()
+        while self.requests[userId] and self.requests[userId][0] <= now - self.window_size:
+            self.requests[userId].popleft()
+
+        
+        if len(self.requests[userId]) < self.max_request:
+            self.requests[userId].append(now)
+            return True
+
+        return False
+
+
+class SlidingWindowCounterRateLimiter:
+
+    def __init__(self, capacity, window_size):
+        self.capacity = capacity
+        self.window_size = window_size
+        self.requests = defaultdict(lambda: [0, time.time()])
+
+    
+    def allow_request(self, userId):
+        now = time.time()
+        count, timestamp = self.requests[userId]
+
+        if now - timestamp >= self.window_size:
+            self.requests[userId] = [1, now]
+            return True
+        
+
+        if count < self.capacity:
+            self.requests[userId][0] += 1
+            return True
+        return False
+
+
+
+
+def main():
+
+    #TokenBucketrateLimiter
+
+    # token_bucket = TokenBucketRateLimiter(rate=1, capacity=5)
+    # print(token_bucket.allow_request("user1"))  # True
+    # print(token_bucket.allow_request("user1"))  # True
+    # print(token_bucket.allow_request("user1"))  # True
+    # print(token_bucket.allow_request("user1"))  # True
+    # print(token_bucket.allow_request("user1"))  # True
+    # time.sleep(1)
+    # print(token_bucket.allow_request("user1"))  # True
+    # print(token_bucket.allow_request("user1"))  # True
+    # print(token_bucket.allow_request("user1"))  # True
+
+    # print("Fixed Window Rate Limiter")
+
+    # #Fixed Window Rate Limit
+    # fixed_window_bucket = FixedWindowRateLimiter(5, 5)
+    # print(fixed_window_bucket.allow_request("user1"))
+    # print(fixed_window_bucket.allow_request("user1"))
+    # print(fixed_window_bucket.allow_request("user1"))
+    # print(fixed_window_bucket.allow_request("user1"))
+    # print(fixed_window_bucket.allow_request("user1"))
+    # print(fixed_window_bucket.allow_request("user1"))
+    # print(fixed_window_bucket.allow_request("user1"))
+    # time.sleep(5)
+    # print(fixed_window_bucket.allow_request("user1"))
+    # print(fixed_window_bucket.allow_request("user1"))
+
+
+    # print("sliding Window Log Limiter")
+
+    # #sliding window log
+    # sliding_window_log = SlidingWindowLogRateLimiter(10, 5)
+    # print(sliding_window_log.allow_request("user1"))
+    # time.sleep(2)
+    # print(sliding_window_log.allow_request("user1"))
+    # print(sliding_window_log.allow_request("user1"))
+    # print(sliding_window_log.allow_request("user1"))
+    # print(sliding_window_log.allow_request("user1"))
+    # print(sliding_window_log.allow_request("user1"))
+    # time.sleep(12)
+    # print(sliding_window_log.allow_request("user1"))
+    # print(sliding_window_log.allow_request("user1"))
+    # print(sliding_window_log.allow_request("user1"))
+    # print(sliding_window_log.allow_request("user1"))
+    # print(sliding_window_log.allow_request("user1"))
+
+
+
+    sliding_window_counter = SlidingWindowCounterRateLimiter(5, 30)
+
+    print(sliding_window_counter.allow_request("user1"))
+    print(sliding_window_counter.allow_request("user1"))
+    print(sliding_window_counter.allow_request("user1"))
+    print(sliding_window_counter.allow_request("user1"))
+    print(sliding_window_counter.allow_request("user1"))
+    print(sliding_window_counter.allow_request("user1"))
+    print(sliding_window_counter.allow_request("user1"))
+    print(sliding_window_counter.allow_request("user1"))
+
+
+
+
+    
+
+
+
 
 
 
 if __name__ == "__main__":
-    HotelManagementDemo.run()
+    main()
+
+
     
